@@ -138,30 +138,62 @@ if __name__ == "__main__":
     # Pondérez les rendements en fonction de leur poids dans le portefeuille
     df['returns_portfolio'] = weights[0] * df['returns_SPX'] + weights[1] * df['returns_NDX']
 
-    # =============================================================================
-    # Utilisation des modèles
-    # =============================================================================
-
-    var_daily = var_historique(df, confidence_level=5)
-    var_cov = variance_covariance_method(df, weights, confidence_level=0.05)
-    var_riskmetrics = riskmetrics_VaR(df, weights, confidence_level=0.05)
-    var_ccc_garch = calculate_CCC_GARCH_VaR(df, weights, confidence_level=0.05)
+    df_1 = df.copy()
+    df_5 = df.copy()
 
     # =============================================================================
-    # Création des graphiques
+    # Utilisation des modèles VaR 5%
+    # =============================================================================
+
+    var_daily = var_historique(df_5, confidence_level=5)
+    var_cov = variance_covariance_method(df_5, weights, confidence_level=0.05)
+    var_riskmetrics = riskmetrics_VaR(df_5, weights, confidence_level=0.05)
+    var_ccc_garch = calculate_CCC_GARCH_VaR(df_5, weights, confidence_level=0.05)
+
+    # =============================================================================
+    # Création du graphique
     # =============================================================================
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
-    ax.plot(df['returns_portfolio'].iloc[1135:], label='Portfolio Returns', color='blue')
-    ax.plot(df['VaR_daily'].dropna(), color='red', linestyle='-', label='Daily VaR 95% (Historical)')
-    ax.plot(df['VaR_riskmetrics'].dropna(), color='lightgreen', linestyle='-', label='Daily VaR 95% (RiskMetrics)')
-    ax.plot(df['Var_cov'].dropna(), color='skyblue', linestyle='-', label='Daily VaR 95% (Variance-Covariance)')
-    ax.plot(df['VaR_CCC_GARCH'].dropna(), color='fuchsia', linestyle='-', label='Daily VaR 95% (CCC-GARCH)')
+    ax.plot(df_5['returns_portfolio'].iloc[1135:], label='Portfolio Returns', color='blue')
+    ax.plot(df_5['VaR_daily'].dropna(), color='red', linestyle='-', label='Daily VaR 95% (Historical)')
+    ax.plot(df_5['VaR_riskmetrics'].dropna(), color='lightgreen', linestyle='-', label='Daily VaR 95% (RiskMetrics)')
+    ax.plot(df_5['Var_cov'].dropna(), color='skyblue', linestyle='-', label='Daily VaR 95% (Variance-Covariance)')
+    ax.plot(df_5['VaR_CCC_GARCH'].dropna(), color='fuchsia', linestyle='-', label='Daily VaR 95% (CCC-GARCH)')
     ax.set_xlabel('Time')
     ax.set_ylabel('Returns / VaR')
     ax.set_title('Portfolio Returns and Daily Historical VaR Over Time')
     ax.legend(loc='upper right')
-    ax.set_xlim(df.index[1135], df.index[-1])
+    ax.set_xlim(df_5.index[1135], df_5.index[-1])
 
     plt.show()
+
+    # =============================================================================
+    # Utilisation des modèles VaR 1%
+    # =============================================================================
+
+    var_daily = var_historique(df_1, confidence_level=1)
+    var_cov = variance_covariance_method(df_1, weights, confidence_level=0.01)
+    var_riskmetrics = riskmetrics_VaR(df_1, weights, confidence_level=0.01)
+    var_ccc_garch = calculate_CCC_GARCH_VaR(df_1, weights, confidence_level=0.01)
+
+    # =============================================================================
+    # Création du graphique
+    # =============================================================================
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    ax.plot(df_1['returns_portfolio'].iloc[1135:], label='Portfolio Returns', color='blue')
+    ax.plot(df_1['VaR_daily'].dropna(), color='red', linestyle='-', label='Daily VaR 99% (Historical)')
+    ax.plot(df_1['VaR_riskmetrics'].dropna(), color='lightgreen', linestyle='-', label='Daily VaR 99% (RiskMetrics)')
+    ax.plot(df_1['Var_cov'].dropna(), color='skyblue', linestyle='-', label='Daily VaR 99% (Variance-Covariance)')
+    ax.plot(df_1['VaR_CCC_GARCH'].dropna(), color='fuchsia', linestyle='-', label='Daily VaR 99% (CCC-GARCH)')
+    ax.set_xlabel('Time')
+    ax.set_ylabel('Returns / VaR')
+    ax.set_title('Portfolio Returns and Daily Historical VaR Over Time')
+    ax.legend(loc='upper right')
+    ax.set_xlim(df_1.index[1135], df_1.index[-1])
+
+    plt.show()
+
