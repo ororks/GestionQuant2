@@ -3,11 +3,14 @@ import pandas as pd
 import numpy as np
 from scipy.stats import norm
 from arch import arch_model
+from scipy.stats import chi2
 
-def var_historique(df, window_size=1135, confidence_level=5):
-    df['VaR_daily'] = np.nan
+
+def historical_VaR(df, confidence_level, window_size=1135):
+    df['VaR_historique'] = np.nan
     for i in range(window_size, len(df)):
-        df.loc[df.index[i], 'VaR_daily'] = np.percentile(df['returns_portfolio'].iloc[i-window_size:i].dropna(), confidence_level)
+        df.loc[df.index[i], 'VaR_historique'] = np.percentile(df['returns_portfolio'].iloc[i-window_size:i].dropna(),
+                                                              confidence_level)
 
     return df
 
@@ -105,7 +108,56 @@ def calculate_CCC_GARCH_VaR(df, weights, initial_window_size=1135, confidence_le
 
     return df
 
+def christoffersen_test(returns, var, alpha):
+    """Likelihood ratio framework of Christoffersen (1998)"""
+    # Calculer les violations de la VaR (rendements < -VaR de t-1)
+    hits = (returns < var.shift(1))*1
+    hits = hits.to_numpy()
 
+    tr = hits[1:] - hits[:-1]  # Sequence to find transitions
+
+    # Transitions: nij denotes state i is followed by state j nij times
+    n01, n10 = (tr == 1).sum(), (tr == -1).sum()
+    n11, n00 = (hits[1:][tr == 0] == 1).sum(), (hits[1:][tr == 0] == 0).sum()
+
+    # Times in the states
+    n0, n1 = n01 + n00, n10 + n11
+    n = n0 + n1
+
+    # Probabilities of the transitions from one state to another
+    p01, p11 = n01 / (n00 + n01), n11 / (n11 + n10)
+    p = n1 / n
+
+    if n1 > 0:
+        # Unconditional Coverage
+        uc_h0 = n0 * np.log(1 - alpha) + n1 * np.log(alpha)
+        uc_h1 = n0 * np.log(1 - p) + n1 * np.log(p)
+        uc = -2 * (uc_h0 - uc_h1)
+
+        # Independence
+        ind_h0 = (n00 + n01) * np.log(1 - p) + (n01 + n11) * np.log(p)
+        ind_h1 = n00 * np.log(1 - p01) + n01 * np.log(p01) + n10 * np.log(1 - p11)
+        if p11 > 0:
+            ind_h1 += n11 * np.log(p11)
+        ind = -2 * (ind_h0 - ind_h1)
+
+        # Conditional coverage
+        cc = uc + ind
+
+        # Stack results
+        df = pd.concat([pd.Series(["", uc, ind, cc]),
+                        pd.Series([p,
+                                   1 - chi2.cdf(uc, 1),
+                                   1 - chi2.cdf(ind, 1),
+                                   1 - chi2.cdf(cc, 2)])], axis=1)
+    else:
+        df = pd.DataFrame(np.zeros((3, 2))).replace(0, np.nan)
+
+    # Assign names
+    df.columns = ["Statistic", "Résultat/p-value"]
+    df.index = ["EFV", "Unconditional (uc)", "Independence (ind)", "Conditional (cc)"]
+
+    return df.round(3)
 
 # =============================================================================
 # Exécution du code principal
@@ -138,62 +190,49 @@ if __name__ == "__main__":
     # Pondérez les rendements en fonction de leur poids dans le portefeuille
     df['returns_portfolio'] = weights[0] * df['returns_SPX'] + weights[1] * df['returns_NDX']
 
-    df_1 = df.copy()
-    df_5 = df.copy()
+    df_ini = df.copy()
 
-    # =============================================================================
-    # Utilisation des modèles VaR 5%
-    # =============================================================================
+    for alpha in [0.05, 0.01]:
+        print(f'\nVaR à  {100-alpha*100}%')
+        df = df_ini.copy()
 
-    var_daily = var_historique(df_5, confidence_level=5)
-    var_cov = variance_covariance_method(df_5, weights, confidence_level=0.05)
-    var_riskmetrics = riskmetrics_VaR(df_5, weights, confidence_level=0.05)
-    var_ccc_garch = calculate_CCC_GARCH_VaR(df_5, weights, confidence_level=0.05)
+        # =============================================================================
+        # Utilisation des modèles VaR
+        # =============================================================================
 
-    # =============================================================================
-    # Création du graphique
-    # =============================================================================
+        var_historique = historical_VaR(df, confidence_level=alpha * 100)
+        var_cov = variance_covariance_method(df, weights, confidence_level=alpha)
+        var_riskmetrics = riskmetrics_VaR(df, weights, confidence_level=alpha)
+        var_ccc_garch = calculate_CCC_GARCH_VaR(df, weights, confidence_level=alpha)
 
-    fig, ax = plt.subplots(figsize=(12, 6))
+        # =============================================================================
+        # Création du graphique
+        # =============================================================================
 
-    ax.plot(df_5['returns_portfolio'].iloc[1135:], label='Portfolio Returns', color='blue')
-    ax.plot(df_5['VaR_daily'].dropna(), color='red', linestyle='-', label='Daily VaR 95% (Historical)')
-    ax.plot(df_5['VaR_riskmetrics'].dropna(), color='lightgreen', linestyle='-', label='Daily VaR 95% (RiskMetrics)')
-    ax.plot(df_5['Var_cov'].dropna(), color='skyblue', linestyle='-', label='Daily VaR 95% (Variance-Covariance)')
-    ax.plot(df_5['VaR_CCC_GARCH'].dropna(), color='fuchsia', linestyle='-', label='Daily VaR 95% (CCC-GARCH)')
-    ax.set_xlabel('Time')
-    ax.set_ylabel('Returns / VaR')
-    ax.set_title('Portfolio Returns and Daily Historical VaR Over Time')
-    ax.legend(loc='upper right')
-    ax.set_xlim(df_5.index[1135], df_5.index[-1])
+        fig, ax = plt.subplots(figsize=(12, 6))
 
-    plt.show()
+        ax.plot(df['returns_portfolio'].iloc[1135:], label='Portfolio Returns', color='blue')
+        ax.plot(df['VaR_historique'].dropna(), color='red', linestyle='-', label=f'Daily VaR {100-alpha*100}% (Historical)')
+        ax.plot(df['VaR_riskmetrics'].dropna(), color='lightgreen', linestyle='-', label=f'Daily VaR {100-alpha*100}% (RiskMetrics)')
+        ax.plot(df['Var_cov'].dropna(), color='skyblue', linestyle='-', label=f'Daily VaR {100-alpha*100}% (Variance-Covariance)')
+        ax.plot(df['VaR_CCC_GARCH'].dropna(), color='fuchsia', linestyle='-', label=f'Daily VaR {100-alpha*100}% (CCC-GARCH)')
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Returns / VaR')
+        ax.set_title('Portfolio Returns and Daily Historical VaR Over Time')
+        ax.legend(loc='upper right')
+        ax.set_xlim(df.index[1135], df.index[-1])
 
-    # =============================================================================
-    # Utilisation des modèles VaR 1%
-    # =============================================================================
+        plt.show()
 
-    var_daily = var_historique(df_1, confidence_level=1)
-    var_cov = variance_covariance_method(df_1, weights, confidence_level=0.01)
-    var_riskmetrics = riskmetrics_VaR(df_1, weights, confidence_level=0.01)
-    var_ccc_garch = calculate_CCC_GARCH_VaR(df_1, weights, confidence_level=0.01)
+        # =============================================================================
+        # Test de Christoffersen
+        # =============================================================================
 
-    # =============================================================================
-    # Création du graphique
-    # =============================================================================
+        # Sélectionner les rendements et les valeurs VaR pour le test
+        returns = df.iloc[1135:-1]
 
-    fig, ax = plt.subplots(figsize=(12, 6))
-
-    ax.plot(df_1['returns_portfolio'].iloc[1135:], label='Portfolio Returns', color='blue')
-    ax.plot(df_1['VaR_daily'].dropna(), color='red', linestyle='-', label='Daily VaR 99% (Historical)')
-    ax.plot(df_1['VaR_riskmetrics'].dropna(), color='lightgreen', linestyle='-', label='Daily VaR 99% (RiskMetrics)')
-    ax.plot(df_1['Var_cov'].dropna(), color='skyblue', linestyle='-', label='Daily VaR 99% (Variance-Covariance)')
-    ax.plot(df_1['VaR_CCC_GARCH'].dropna(), color='fuchsia', linestyle='-', label='Daily VaR 99% (CCC-GARCH)')
-    ax.set_xlabel('Time')
-    ax.set_ylabel('Returns / VaR')
-    ax.set_title('Portfolio Returns and Daily Historical VaR Over Time')
-    ax.legend(loc='upper right')
-    ax.set_xlim(df_1.index[1135], df_1.index[-1])
-
-    plt.show()
-
+        for var in ['VaR_historique', 'VaR_riskmetrics', 'Var_cov', 'VaR_CCC_GARCH']:
+            print(f'\nVaR: {var}')
+            # Effectuer le test
+            test_results = christoffersen_test(returns['returns_portfolio'], returns[var], alpha)
+            print(test_results)
