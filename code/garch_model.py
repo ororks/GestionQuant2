@@ -20,7 +20,6 @@ def rpy2_output_error(output):
     except UnicodeDecodeError as e:
         print("R output contained characters that could not be decoded:", e)
 
-# Override the default error handling and output
 callbacks.consolewrite_print = rpy2_output_error
 callbacks.consolewrite_warnerror = rpy2_output_error
 
@@ -146,28 +145,57 @@ class Garch():
             print("Résidus pas dispos pour les deux séries")
 
     def fit_copula_garch(self, residuals_1, residuals_2):
-        self.save_residuals()
         script_path = "C:/Users/roman/OneDrive/Bureau/M2EIF/S2/Projet_GQ2/code/fit_copula.R"
 
-        # Load R script
         robjects.r(f'source("{script_path}")')
 
-        # Prepare data frame in Python and convert to R
         df = pd.DataFrame({
             'Residuals1': residuals_1,
             'Residuals2': residuals_2
         })
         r_dataframe = pandas2ri.py2rpy(df)
 
-        # Call R function directly with converted data frame
         try:
             r_fit_copula = robjects.globalenv['fit_copula']
             result = r_fit_copula(r_dataframe, self.copula_type)
-            simulated_residuals = np.array(result)  # Ensure result is a numpy array
+            simulated_residuals = np.array(result)
             return simulated_residuals
         except Exception as e:
             print("Error during copula fitting:", e)
             return None
+
+
+    def fitted_copula_params(self):
+        window_size = 1135
+        returns_window = self.returns
+        returns2_window = self.returns2
+
+        theta_opti_1, _ = self.optim(returns_window, self.get_var_incondi())
+        var_condi_1 = self.fit(theta_opti_1, returns_window, self.get_var_incondi())
+        residuals_1 = self.compute_residuals(theta_opti_1, returns_window, var_condi_1)
+        theta_opti_2, _ = self.optim(returns2_window, self.get_var_incondi(suffix='2'))
+        var_condi_2 = self.fit(theta_opti_2, returns2_window, self.get_var_incondi(suffix='2'))
+        residuals_2 = self.compute_residuals(theta_opti_2, returns2_window, var_condi_2)
+
+        script_path = "C:/Users/roman/OneDrive/Bureau/M2EIF/S2/Projet_GQ2/code/fit_copula.R"
+
+        robjects.r(f'source("{script_path}")')
+
+        df = pd.DataFrame({
+            'Residuals1': residuals_1,
+            'Residuals2': residuals_2
+        })
+        r_dataframe = pandas2ri.py2rpy(df)
+
+        try:
+            r_fit_copula_params = robjects.globalenv['fit_copula_params']
+            result = r_fit_copula_params(r_dataframe, self.copula_type)
+            print(result)
+        except Exception as e:
+            print("Error during copula fitting:", e)
+            return None
+
+
 
     def main_loop(self):
         T = len(self.returns)
@@ -184,96 +212,34 @@ class Garch():
 
             theta_opti_1, _ = self.optim(returns_window, self.get_var_incondi())
             var_condi_1 = self.fit(theta_opti_1, returns_window, self.get_var_incondi())
-            print(f'var_condi 1 : {var_condi_1}')
             residuals_1 = self.compute_residuals(theta_opti_1, returns_window, var_condi_1)
             var_condi_1_pred = self.predict_variance(returns_window, theta_opti_1, var_condi_1, self.get_var_incondi(), h=1)
-            print(f'var_condi_pred 1 : {var_condi_1_pred}')
             mean_1_pred = self.predict_mean(theta_opti_1, 1)
-            print(f'moyenne predite 1 : {mean_1_pred}')
             theta_opti_2, _ = self.optim(returns2_window, self.get_var_incondi(suffix='2'))
             var_condi_2 = self.fit(theta_opti_2, returns2_window, self.get_var_incondi(suffix='2'))
-            print(f'var_condi 2 : {var_condi_2}')
             residuals_2 = self.compute_residuals(theta_opti_2, returns2_window, var_condi_2)
             var_condi_2_pred = self.predict_variance(returns2_window, theta_opti_2, var_condi_2,
                                                      self.get_var_incondi(suffix='2'), h=1)
-            print(f'var_condi_pred 2 : {var_condi_2_pred}')
             mean_2_pred = self.predict_mean(theta_opti_2, 1)
-            print(f'moyenne predite 2 : {mean_2_pred}')
             MC_residuals = self.fit_copula_garch(residuals_1, residuals_2)
 
             portfolio = []
             for j in range(len(MC_residuals)):
                 simu_resid_1 = MC_residuals[j, 0]
-                print(f'resid 1 simu : {simu_resid_1}')
                 simu_resid_2 = MC_residuals[j, 1]
-                print(f'resid 2 simu : {simu_resid_2}')
                 simu_return_1 = np.sqrt(var_condi_1_pred) * simu_resid_1 + mean_1_pred
-                print(f'rend simu 1 : {simu_return_1}')
                 simu_return_2 = np.sqrt(var_condi_2_pred) * simu_resid_2 + mean_2_pred
-                print(f'rend simu 2 : {simu_return_2}')
                 price_1_t_1 = self.price[end_index - 1]
-                print(f'prix en t-1 : {price_1_t_1}')
                 price_2_t_1 = self.price2[end_index - 1]
-                print(f'prix 2 en t-1 : {price_2_t_1}')
                 portfolio_value = ((np.exp(simu_return_1)*price_1_t_1 - price_1_t_1) + (
                             np.exp(simu_return_2)*price_2_t_1 - price_2_t_1))/2
-                print(f'partie 1 du portefeuille : {(0.5 * price_1_t_1 * (np.exp(simu_return_1*100) - 1))}')
-                print(f'partie 2 du portefeuille : {(0.5 * price_2_t_1 * (np.exp(simu_return_2*100) - 1))}')
-                print(f'valeur profit-loss :{portfolio_value}')
-                portfolio.append(portfolio_value)
+                portfolio.append(portfolio_value/10)
 
             portfolio.sort()
             perc95_VaR.append(np.percentile(portfolio, 5))
             perc99_VaR.append(np.percentile(portfolio, 1))
 
         return perc95_VaR, perc99_VaR
-
-    # def get_copula_returns(self):
-    #     predicted_var = self.predict_variance()
-    #     predicted_var2 = self.get_predicted_variance(suffix='2')
-    #     predicted_mean = self.get_predicted_mean()
-    #     predicted_mean2 = self.get_predicted_mean(suffix='2')
-    #     residuals_copula = np.hsplit(self.results_copula, 2)[0]
-    #     residuals_copula2 = np.hsplit(self.results_copula, 2)[1]
-    #     copula_returns = np.sum(np.dot(np.sqrt(predicted_var), residuals_copula.flatten()), predicted_mean)
-    #     copula_returns2 = np.sum(np.dot(np.sqrt(predicted_var2), residuals_copula2), predicted_mean2)
-    #     df = np.concatenate([copula_returns, copula_returns2], axis=1)
-    #     return df
-
-
-    # def calculate_cdf(self, residuals):
-    #     sorted_residuals = np.sort(residuals)
-    #     cdf = norm.cdf(sorted_residuals)
-    #     return cdf
-    #
-    # def copula_density(self, u1, u2):
-    #     # This function should return the copula density based on the copula_density_matrix
-    #     # Placeholder example for a Gaussian copula
-    #     from scipy.stats import norm
-    #     rho = np.corrcoef(u1, u2)[0, 1]  # correlation coefficient
-    #     return np.exp(-0.5 * ((u1 ** 2 - 2 * rho * u1 * u2 + u2 ** 2) / (1 - rho ** 2))) / (
-    #                 2 * np.pi * np.sqrt(1 - rho ** 2))
-    #
-    # def integrand(self, u1, u2, VaR_t, pi, cdf1, cdf2, pdf1, pdf2):
-    #     z_t = (VaR_t / pi) - ((1 - pi) / pi) * u2
-    #     return self.copula_density(cdf1(u1), cdf2(u2)) * pdf1(u1) * pdf2(u2)
-    #
-    # def equation_to_solve(self, VaR_t, alpha, pi, cdf1, cdf2, pdf1, pdf2):
-    #     integral_result, _ = dblquad(lambda u2, u1: self.integrand(u1, u2, VaR_t, pi, cdf1, cdf2, pdf1, pdf2),
-    #                                  -np.inf, np.inf,
-    #                                  lambda u1: -np.inf, lambda u1: np.inf)
-    #     return integral_result - alpha
-    #
-    # def calculate_var(self, alpha, pi=0.5):
-    #     cdf1, pdf1 = self.calculate_cdf_and_pdf(self.residuals)
-    #     cdf2, pdf2 = self.calculate_cdf_and_pdf(self.residuals2)
-    #
-    #     VaR_t_initial_guess = 1.0
-    #
-    #     VaR_t_solution = fsolve(self.equation_to_solve, VaR_t_initial_guess, args=(alpha, pi, cdf1, cdf2, pdf1, pdf2))[
-    #         0]
-    #     return VaR_t_solution
-
 
     def plot(self):
         fig, ax = plt.subplots(figsize=(12, 6))
