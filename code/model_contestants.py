@@ -4,8 +4,12 @@ import numpy as np
 from scipy.stats import chi2
 from scipy.special import expit
 
-def christoffersen_test(returns, var, alpha):
+def christoffersen_test(df, var_name, alpha):
     """Likelihood ratio framework of Christoffersen (1998)"""
+
+    returns = df['returns_portfolio']
+    var = df[var_name]
+
     # Calculer les violations de la VaR (rendements < -VaR de t-1)
     hits = (returns < var.shift(1))*1
     hits = hits.to_numpy()
@@ -41,8 +45,7 @@ def christoffersen_test(returns, var, alpha):
         cc = uc + ind
 
         # Stack results
-        df = pd.concat([pd.Series(["", uc, ind, cc]),
-                        pd.Series([p,
+        df = pd.concat([pd.Series([p,
                                    1 - chi2.cdf(uc, 1),
                                    1 - chi2.cdf(ind, 1),
                                    1 - chi2.cdf(cc, 2)])], axis=1)
@@ -50,7 +53,7 @@ def christoffersen_test(returns, var, alpha):
         df = pd.DataFrame(np.zeros((3, 2))).replace(0, np.nan)
 
     # Assign names
-    df.columns = ["Statistic", "Résultat/p-value"]
+    df.columns = [var_name]
     df.index = ["EFV", "Unconditional (uc)", "Independence (ind)", "Conditional (cc)"]
 
     return df.round(3)
@@ -111,30 +114,79 @@ def spa_test(df, var_columns, alpha, base_var):
 # Exécution du code principal
 # =============================================================================
 if __name__ == "__main__":
-    var_columns = ['VaR_historique', 'VaR_riskmetrics', 'Var_cov', 'VaR_CCC_GARCH']
 
-    for alpha in [0.05, 0.01]:
-        df = pd.read_excel(rf'../datas/VaR_{alpha}.xlsx')
-        #Remove first column
-        returns = df.drop(df.columns[0], axis=1)
+    classic_var_95 = pd.read_excel(rf'../datas/VaR_0.05.xlsx')
+    classic_var_95 = classic_var_95[
+        ['Dates', 'returns_portfolio', 'VaR_historique', 'VaR_riskmetrics', 'Var_cov', 'VaR_CCC_GARCH']]
+    classic_var_95 = classic_var_95.iloc[-500:]
 
-        # =============================================================================
-        # Test de Christoffersen
-        # =============================================================================
+    garch_var_95 = pd.read_csv(rf'../datas/Garch_VaR_95.csv')
 
-        for var in var_columns:
-            print(f'\nVaR: {var}')
-            # Effectuer le test
-            test_results = christoffersen_test(returns['returns_portfolio'], returns[var], alpha)
-            print(test_results)
+    MSM_var_95 = pd.read_csv(rf'../datas/MSM_VaR.csv')
+    MSM_var_95 = MSM_var_95.rename(columns={'0': 'MSM_var'})
+    MSM_var_95['MSM_var'] = MSM_var_95['MSM_var'].apply(lambda x: x * 100)
 
-        # =============================================================================
-        # Test de Hansen
-        # =============================================================================
+    # Joindre les données
+    df = classic_var_95.merge(garch_var_95, left_index=True, right_index=True)
+    # Réinitialiser les indices de MSM_var_95 pour correspondre aux 50 derniers indices de df
+    MSM_var_95.index = df.index[-50:]
+    # Joindre df et MSM_var_95
+    df = df.join(MSM_var_95)
 
-        base_var = 'VaR_historique'  # Exemple de modèle de référence
-        spa_results = spa_test(df, var_columns, alpha, base_var)
+    # =============================================================================
+    # Test de Christoffersen
+    # =============================================================================
 
-        print(f"\nRésultats du test SPA à {100 * (1 - alpha)}% par rapport à {base_var} :")
-        for var, p_value in spa_results.items():
-            print(f"{var}: p-value = {p_value:.4f}")
+    var_columns = df.drop(['Dates', 'MSM_var', 'returns_portfolio'], axis=1).columns.tolist()
+
+    results = []
+
+    for var in var_columns:
+        test_results = christoffersen_test(df, var, 0.05)
+        results.append(test_results)
+
+    # test MSM 95%
+    df_MSM_test = df[['returns_portfolio', 'MSM_var']].tail(50)
+    test_results_MSM = christoffersen_test(df_MSM_test, 'MSM_var', 0.05)
+    results.append(test_results_MSM)
+
+    pd.set_option('display.max_columns', None)
+    all_results = pd.concat(results, axis=1)
+    print(all_results)
+    all_results.to_csv('Christoffersen_5.csv')
+
+
+    ### 99% VaR
+    classic_var_99 = pd.read_excel(rf'../datas/VaR_0.01.xlsx')
+    classic_var_99 = classic_var_99[
+        ['Dates', 'returns_portfolio', 'VaR_historique', 'VaR_riskmetrics', 'Var_cov', 'VaR_CCC_GARCH']]
+    classic_var_99 = classic_var_99.iloc[-500:]
+
+    garch_var_99 = pd.read_csv(rf'../datas/Garch_VaR_99.csv')
+
+    # Joindre les données
+    df = classic_var_99.merge(garch_var_99, left_index=True, right_index=True)
+
+    results = []
+
+    for var in var_columns:
+        # Effectuer le test
+        test_results = christoffersen_test(df, var, 0.01)
+        results.append(test_results)
+
+    pd.set_option('display.max_columns', None)
+    all_results = pd.concat(results, axis=1)
+    print(all_results)
+    all_results.to_csv('Christoffersen_1.csv')
+
+
+    # =============================================================================
+    # Test de Hansen
+    # =============================================================================
+
+    '''base_var = 'VaR_historique'  # Exemple de modèle de référence
+    spa_results = spa_test(df, var_columns, alpha, base_var)
+
+    print(f"\nRésultats du test SPA à {100 * (1 - alpha)}% par rapport à {base_var} :")
+    for var, p_value in spa_results.items():
+        print(f"{var}: p-value = {p_value:.4f}")'''
