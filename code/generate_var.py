@@ -90,7 +90,7 @@ def calculate_CCC_GARCH_VaR(df, weights, initial_window_size=1135, confidence_le
         current_residuals = pd.DataFrame({asset: res for asset, res in residuals.items()})
         current_correlation = current_residuals.iloc[-initial_window_size:].corr().values
 
-        # Constructionde  D_t et Omega_t au temps t
+        # Construction de  D_t et Omega_t au temps t
         D_t = np.diag([volatilities[asset][t] for asset in ['returns_SPX', 'returns_NDX']])
         Omega_t = D_t @ current_correlation @ D_t
 

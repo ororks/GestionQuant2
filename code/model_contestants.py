@@ -73,7 +73,7 @@ if __name__ == "__main__":
 
     df = classic_var_95.merge(garch_var_95, left_index=True, right_index=True)
     # Réinitialiser les indices de MSM_var_95 pour correspondre aux 50 derniers indices de df
-    MSM_var_95.index = df.index[-50:]
+    MSM_var_95.index = df.index[-100:]
 
     df = df.join(MSM_var_95)
 
@@ -90,7 +90,7 @@ if __name__ == "__main__":
         results.append(test_results)
 
     # test MSM 95%
-    df_MSM_test = df[['returns_portfolio', 'MSM_var']].tail(50)
+    df_MSM_test = df[['returns_portfolio', 'MSM_var']].tail(100)
     test_results_MSM = christoffersen_test(df_MSM_test, 'MSM_var', 0.05)
     results.append(test_results_MSM)
 

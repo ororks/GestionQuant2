@@ -78,7 +78,7 @@ if __name__ == "__main__":
     MSM_var_95['MSM_var'] = MSM_var_95['MSM_var'].apply(lambda x: x * 100)
 
     df = classic_var_95.merge(garch_var_95, left_index=True, right_index=True)
-    MSM_var_95.index = df.index[-50:]
+    MSM_var_95.index = df.index[-100:]
     df = df.join(MSM_var_95)
 
     plot_var_95(df, 5)
