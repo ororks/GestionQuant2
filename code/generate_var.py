@@ -113,16 +113,16 @@ def calculate_CCC_GARCH_VaR(df, weights, initial_window_size=1135, confidence_le
 if __name__ == "__main__":
     # Extraction des données
     df = pd.read_excel(r'../datas/SP500NASDAQ.xlsx')
-    df["SPX"] = pd.to_numeric(df["SPX"], errors="coerce")
-    df["NDX"] = pd.to_numeric(df["NDX"], errors="coerce")
-    df = df[df["SPX"].notna() & df["NDX"].notna()]
+    df["SP500"] = pd.to_numeric(df["SP500"], errors="coerce")
+    df["NASDAQCOM"] = pd.to_numeric(df["NASDAQCOM"], errors="coerce")
+    df = df[df["SP500"].notna() & df["NASDAQCOM"].notna()]
 
     # Définir les poids du portefeuille
     weights = np.array([0.5, 0.5])
 
     # Calculez les rendements log des données
-    df['returns_SPX'] = np.log(df['SPX']).diff() * 100
-    df['returns_NDX'] = np.log(df['NDX']).diff() * 100
+    df['returns_SPX'] = np.log(df['SP500']).diff() * 100
+    df['returns_NDX'] = np.log(df['NASDAQCOM']).diff() * 100
 
     # Pondérez les rendements en fonction de leur poids dans le portefeuille
     df['returns_portfolio'] = weights[0] * df['returns_SPX'] + weights[1] * df['returns_NDX']
