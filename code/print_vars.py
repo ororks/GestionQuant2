@@ -77,11 +77,8 @@ if __name__ == "__main__":
     MSM_var_95 = MSM_var_95.rename(columns={'0': 'MSM_var'})
     MSM_var_95['MSM_var'] = MSM_var_95['MSM_var'].apply(lambda x: x * 100)
 
-    # Joindre les données
     df = classic_var_95.merge(garch_var_95, left_index=True, right_index=True)
-    # Réinitialiser les indices de MSM_var_95 pour correspondre aux 50 derniers indices de df
     MSM_var_95.index = df.index[-50:]
-    # Joindre df et MSM_var_95
     df = df.join(MSM_var_95)
 
     plot_var_95(df, 5)
@@ -96,7 +93,6 @@ if __name__ == "__main__":
 
     garch_var_99 = pd.read_csv(rf'../datas/Garch_VaR_99.csv')
 
-    # Joindre les données
     df = classic_var_99.merge(garch_var_99, left_index=True, right_index=True)
 
     plot_var_99(df, 1)
