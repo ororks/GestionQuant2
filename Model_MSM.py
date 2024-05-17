@@ -1,3 +1,6 @@
+import density_and_marginals
+import gaussian_copula
+import student_copula
 import numpy as np
 import pandas as pd
 from numba import jit
@@ -7,10 +10,13 @@ from pymoo.optimize import minimize
 import matplotlib.pyplot as plt
 import itertools
 from scipy.stats import norm
+from scipy.integrate import nquad
 from scipy.optimize import minimize as min
-from scipy.optimize import root
 from scipy.stats import multivariate_normal
 from scipy.integrate import dblquad
+from sympy import symbols, integrate, lambdify
+import calculate_MSM_VaR
+
 
 class Log_likelihood_opti(Problem):
     """
@@ -156,7 +162,7 @@ def compute_loglikelihood(k_compos2, T, A, w_t):
 
         # Vecteur de lls
         LLs[t] = np.log(np.dot(w_t[t, :], piA))
-
+    LLs = LLs[:1135]
     LL = -np.sum(LLs)
 
     return LL, LLs, pi_mat
@@ -311,54 +317,6 @@ def estimate_vol(para, k_compos, data, n_vol=252):
 
     return likelihood, pmat
 
-def calcualte_density(y, pmat, sigma, m0, k_compos):
-
-    denum = calculate_denum(m0, sigma, k_compos)
-    density_f = np.zeros(len(y))
-
-    for j in range(len(y)+1):
-
-        density_f[j-1] = calc_density_t(y[j - 1], denum, pmat[j - 1])
-
-    return density_f
-
-
-def calc_density_t(y, denum, prob):
-
-    x = denum * y
-    density = norm.pdf(x)
-    cond_density = density * denum
-
-    return np.dot(cond_density, prob)
-
-def calculate_denum(m0, sigma, k_compos):
-    # Define your values
-    values = [m0, 2-m0]
-
-    # Generate all possible combinations of the product of the three values
-    combinations = list(itertools.product(values, repeat=k_compos))
-
-    # Calculate the product for each combination
-    products = [np.prod(comb) for comb in combinations]
-
-    return [(1 / (sigma * np.sqrt(val))) for val in products]
-
-def calcualte_marginals(y, pmat, sigma, m0, k_compos):
-
-    denum = calculate_denum(m0, sigma, k_compos)
-    marginal_f = np.zeros(len(y))
-
-    for j in range(len(y)+1):
-
-        marginal_f[j - 1] = calc_marginal_t(y[j - 1], denum, pmat[j - 1])
-
-    return marginal_f
-
-def calc_marginal_t(y, denum, prob):
-
-    cdff = norm.cdf(denum * y)
-
-    return np.dot(cdff, prob)
 
 def data_from_df(df, index):
 
@@ -390,10 +348,10 @@ def proceed_MSM_density_and_marginals_calculation(df, index, k_compos):
     #pmat_index = pmat_index[1:]
 
     # calcul de la densité conditionnelle de f(y) à l'info en t-1
-    fy = calcualte_density(data_index, pmat_index, sigma_index/100, m0_index, k_compos)
+    fy = density_and_marginals.calcualte_density(data_index, pmat_index, sigma_index / 100, m0_index, k_compos)
 
     # calcul des marginales
-    Fy = calcualte_marginals(data_index, pmat_index, sigma_index/100, m0_index, k_compos)
+    Fy = density_and_marginals.calcualte_marginals(data_index, pmat_index, sigma_index / 100, m0_index, k_compos)
 
     valeurs_plot = pd.DataFrame()
     valeurs_plot["volatilité daily estimée"] = result_index
@@ -415,99 +373,19 @@ def proceed_MSM_density_and_marginals_calculation(df, index, k_compos):
 
     return result_index, fy, Fy, pmat_index, m0_index, sigma_index
 
-def gaussian_copula_log_likelihood(rho, f1, f2, F1, F2, sigma1, sigma2):
-    ll = 0
-    for i in range(len(f1)+1):
-        c = max(bivariate_gaussian_copula_pdf(F1[i-1], F2[i-1], sigma1[i-1], sigma2[i-1], rho), 1e-20)
-        ll -= np.log(c) + np.log(f1[i-1]) + np.log(f2[i-1])
-    return ll
-
-# Define joint PDF of standard bivariate normal distribution
-def bivariate_normal_pdf(x1, x2, rho):
-    return (1 / (2 * np.pi * np.sqrt(1 - rho ** 2))) * np.exp(
-        -1 / (2 * (1 - rho ** 2)) * (x1 ** 2 - 2 * rho * x1 * x2 + x2 ** 2)
-    )
-
-# Define inverse CDF (quantile function) of standard normal distribution
-def inv_norm_cdf(u):
-    return norm.ppf(u)
-
-# Define PDF of bivariate Gaussian copula
-def bivariate_gaussian_copula_pdf(u1, u2, sigma1, sigma2, rho):
-    x1 = inv_norm_cdf(u1)
-    x2 = inv_norm_cdf(u2)
-    return bivariate_normal_pdf(x1, x2, rho) / (norm.pdf(x1) * norm.pdf(x2))
-
-# Define the optimization routine
-def optimize_rho(fy_sp500, fy_nasdaq, Fy_sp500, Fy_nasdaq, initial_rho, bounds, sigma_sp500, sigma_nasdaq):
-    # Minimize negative log-likelihood to find optimal rho
-    result = min(gaussian_copula_log_likelihood, initial_rho, args=(fy_sp500, fy_nasdaq, Fy_sp500, Fy_nasdaq, sigma_sp500, sigma_nasdaq),
-                 bounds=[bounds])
-
-    # Optimal value of rho
-    optimal_rho = result.x[0]
-
-    # Minimum log-likelihood value
-    min_log_likelihood = result.fun
-
-    return optimal_rho, min_log_likelihood
-
-def VaR_gaussian_copula(y1, pmat1, sigma1, m01, y2, pmat2, sigma2, m02, k_compos, rho, alpha=0.05):
-    """
-
-
-    """
-    denum1 = calculate_denum(m01, sigma1, k_compos)
-    denum2 = calculate_denum(m02, sigma2, k_compos)
-
-    VaR = np.zeros(len(y1))
-
-    for j in range(len(y1)+1):
-
-        VaR[j-1] = opti_VaR_gc_t(denum1, denum2, pmat1[j-1], pmat2[j-1], rho, alpha)
-
-    return VaR
 
 
 
-def function1(u, v, denum1, denum2, prob1, prob2, rho):
-    return (bivariate_normal_cdf(calc_marginal_t(np.array([u]), denum1, prob1), calc_marginal_t(np.array([v]), denum2, prob2), rho) *
-            calc_density_t(np.array([u]), denum1, prob1) * calc_density_t(np.array([v]), denum2, prob2))
-
-def opti_VaR_gc_t(denum1, denum2, prob1, prob2, rho, alpha):
-    #find z so that calculate_Var_gc_t = 0
-    initial_guess = [0]
-    result = root(calculate_VaR_gc_t, initial_guess, args=(denum1, denum2, prob1, prob2, rho, alpha), method='hybr')
-    return result.x[0]
-
-
-def calculate_VaR_gc_t(z, denum1, denum2, prob1, prob2, rho, alpha):
-    x0, x1 = -np.inf, z  # Limits for x
-    y0, y1 = -np.inf, np.inf  # Limits for y (constants in this case)
-    result, error = dblquad(function1, x0, x1, lambda x: y0, lambda x: y1,
-                            args=(denum1, denum2, prob1, prob2, rho))
-    return result-alpha
-
-def bivariate_normal_cdf(x1, x2, rho):
-
-    mean = np.array([0, 0])
-    cov = np.array([[1, rho], [rho, 1]])  # Default covariance matrix with rho = 0.5
-
-    # Create a multivariate normal distribution object with the specified mean and covariance
-    bivariate_dist = multivariate_normal(mean, cov)
-
-    # Calculate and return the CDF at the point (x1, x2)
-    return bivariate_dist.cdf([x1, x2])
 
 if __name__ == "__main__":
     # Extraction des données
-    datas = pd.read_excel('/Users/nassimchamakh/Dropbox/Mon Mac (MacBook Air de Nassim)/Desktop/M2 IEF Quant/S2/Gestion Quant/GestionQuant2-master/code/SP500NASDAQ2.xls')  # Try Latin-1 if UTF-8 fails
+    datas = pd.read_excel('SP500NASDAQ2.xls')  # Try Latin-1 if UTF-8 fails
 
     df = pd.DataFrame(datas)
     df['DATE'] = pd.to_datetime(df['DATE'])
     df.set_index('DATE', inplace=True)
 
-    k_compos = 5
+    k_compos = 3
     index = 'SP500'
     result_sp500, fy_sp500, Fy_sp500, pmatsp500, m0sp500, sigmasp500 = proceed_MSM_density_and_marginals_calculation(df, index, k_compos)
     index = 'NASDAQCOM'
@@ -516,16 +394,61 @@ if __name__ == "__main__":
 
 
     # Call the optimization routine
-    initial_rho = 0.941
-    bounds = (-0.99, 0.99)
+    initial_rho = 0.5
+
 
     y_sp500 = data_from_df(df, 'SP500')
     y_nasdaq = data_from_df(df, 'NASDAQCOM')
-    optimal_rho, min_log_likelihood = optimize_rho(fy_sp500, fy_nasdaq, Fy_sp500, Fy_nasdaq, initial_rho, bounds, result_sp500, result_nasdaq)
+    # Calculate portfolio
+    ptf = 0.5 * y_sp500 + 0.5 * y_nasdaq
+    ptf = pd.DataFrame(ptf, columns=['Portfolio'])
+    ptf = ptf.tail(51).reset_index(drop=True)
 
-    print("Optimal value of rho:", optimal_rho)
-    print("Log(L):", -min_log_likelihood)
+    # Read VaR data
+    var = pd.read_csv('VaR.csv', names=['VaR'])
 
-    VaR = VaR_gaussian_copula(y_sp500, pmatsp500, sigmasp500, m0sp500, y_nasdaq, pmatnasdaq, sigmanasdaq, m0nasdaq, k_compos, optimal_rho)
+    # Assuming the 'var' DataFrame has a column to plot
+    # Replace 'var_column_name' with the actual column name from the CSV
+    var_column_name = 'VaR'  # Adjust this line according to your CSV file structure
 
-    print(VaR)
+    # Plotting
+    plt.figure(figsize=(10, 6))
+    plt.plot(ptf.index, ptf['Portfolio'], label='Portfolio', marker='o')
+    plt.plot(var.index, var[var_column_name], label='VaR', marker='x')
+
+    # Add labels and title
+    plt.xlabel('Index')
+    plt.ylabel('Value')
+    plt.title('Portfolio vs VaR')
+    plt.legend()
+    plt.grid(True)
+
+    # Display the plot
+    plt.show()
+    """
+    initial_rho_df = np.array([0,0])
+    optimal_rho, min_log_likelihood = student_copula.optimize_rho_df(fy_sp500, fy_nasdaq, Fy_sp500, Fy_nasdaq,
+                                                                   initial_rho_df, bounds)
+    """
+### code pour optimiser la copule de student
+    initial_params = np.array([0.5, 9])
+    bounds = [(0.01, 0.99), (0.01, 30)]
+
+    ### code pour opti copule student
+    rho, mu, L = student_copula.optimize_theta_and_nu(fy_sp500[:1135], fy_nasdaq[:1135], Fy_sp500[:1135], Fy_nasdaq[:1135], initial_params, bounds)
+    #rho = 0.91
+    #mu = 7.1
+    stu_param = np.array([rho, mu])
+### code pour calculer la VaR avec la copule de student
+    pmatsp500 = pmatsp500[-50:]
+    pmatnasdaq = pmatnasdaq[-50:]
+
+    student_copula_MSM_VaR = calculate_MSM_VaR.Calculate_VaR(pmatsp500, sigmasp500/100, m0sp500, pmatnasdaq, sigmanasdaq/100, m0nasdaq, k_compos, stu_param, student_copula.Student_Copula_Pdf, 0.05, 0.005)
+
+    VaR = student_copula_MSM_VaR.VaR_calculation()
+
+    # Convert the numpy array to a Pandas DataFrame
+    VaR_df = pd.DataFrame(VaR)
+
+    # Save the DataFrame to a CSV file
+    VaR_df.to_csv('VaR.csv', index=False, header=True)
