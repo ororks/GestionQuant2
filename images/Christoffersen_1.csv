@@ -1,0 +1,5 @@
+,VaR_historique,VaR_riskmetrics,Var_cov,VaR_CCC_GARCH,Normal,Student,Plackett,Clayton,Frank,Gumbel
+EFV,0.008,0.03,0.012,0.028,0.004,0.004,0.006,0.004,0.008,0.004
+Unconditional (uc),0.645,0.0,0.66,0.001,0.126,0.126,0.334,0.126,0.645,0.126
+Independence (ind),0.019,0.073,0.001,0.055,0.899,0.899,0.849,0.899,0.799,0.899
+Conditional (cc),0.059,0.0,0.004,0.001,0.308,0.308,0.615,0.308,0.87,0.308
